@@ -92,3 +92,39 @@ def test_prompt_includes_transcript_and_comments():
     v.comments = [Comment("a", "좋아요", 3, "")]
     prompt = _build_prompt("주제", v)
     assert "[00:05] 안녕하세요" in prompt and "좋아요" in prompt and "<topic>주제</topic>" in prompt
+
+
+def test_errors_reported_from_main_thread_only():
+    import threading
+
+    videos = [make_video(i, 100 - i) for i in range(4)]
+    labels = {"v0": "boom", "v1": "positive", "v2": "boom", "v3": "negative"}
+    calls = []
+    report = build_report(
+        "x", FakeYouTube(videos), FakeAnalyzer(labels),
+        progress=lambda m: calls.append((threading.current_thread() is threading.main_thread(), m)),
+    )
+    assert all(on_main for on_main, _ in calls)
+    assert sum("건너뜀" in m for _, m in calls) == 2
+    assert len(report.positive) == 1 and len(report.negative) == 1
+
+
+def test_youtube_client_uses_one_api_client_per_thread(monkeypatch):
+    import threading
+
+    import ytpulse.youtube as yt_mod
+
+    monkeypatch.setattr(yt_mod, "build", lambda *a, **k: object())
+    client = yt_mod.YouTubeClient("key")
+    seen = {}
+
+    def grab(name):
+        seen[name] = (client._yt, client._yt)
+
+    threads = [threading.Thread(target=grab, args=(n,)) for n in ("a", "b")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert seen["a"][0] is seen["a"][1]  # reused within a thread
+    assert seen["a"][0] is not seen["b"][0]  # never shared across threads

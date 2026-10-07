@@ -39,8 +39,10 @@ def build_report(
             v.transcript = youtube.transcript(v.video_id)
             return analyzer.analyze(topic, v)
         except Exception as e:  # one bad video shouldn't sink the whole report
-            progress(f"건너뜀: {v.title} ({type(e).__name__}: {e})")
+            # Runs on a worker thread: record the error and let the main thread report
+            # it, since UIs like Streamlit can only be updated from the main thread.
             v.sentiment = "error"
+            v.reason = f"{type(e).__name__}: {e}"
             return v
 
     with ThreadPoolExecutor(max_workers=batch_size) as pool:
@@ -51,7 +53,9 @@ def build_report(
             # map() preserves input order, so view-count ranking is kept.
             for v in pool.map(enrich_and_analyze, batch):
                 scanned += 1
-                if v.sentiment == "positive" and len(positive) < per_side:
+                if v.sentiment == "error":
+                    progress(f"건너뜀: {v.title} ({v.reason})")
+                elif v.sentiment == "positive" and len(positive) < per_side:
                     positive.append(v)
                 elif v.sentiment == "negative" and len(negative) < per_side:
                     negative.append(v)
