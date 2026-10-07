@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from .free_analyzer import make_analyzer
 from .models import TopicReport, Video
 from .pipeline import build_report
+from .report import build_full_report, to_markdown
 from .youtube import YouTubeClient
 
 
@@ -27,6 +28,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lang", default="ko")
     p.add_argument("--json", action="store_true", help="JSON으로 출력")
     p.add_argument("--free", action="store_true", help="Anthropic 키가 있어도 무료 키워드 분석 사용")
+    p.add_argument("--report", type=int, default=10, metavar="N",
+                   help="조회수 상위 N개 영상으로 여론 분석 리포트 작성 (0~50, 0이면 생략, 기본 10)")
     args = p.parse_args(argv)
 
     yt_key = os.environ.get("YOUTUBE_API_KEY")
@@ -43,21 +46,34 @@ def main(argv: list[str] | None = None) -> int:
         per_side=args.per_side,
         comments_per_video=args.comments,
         max_candidates=args.candidates,
+        report_size=max(0, min(args.report, 50)),
         progress=log,
     )
+    opinion = None
+    if args.report > 0:
+        log("뉴스·배경 정보 검색 및 리포트 작성 중...")
+        opinion = build_full_report(
+            report, min(args.report, 50), args.lang, args.region,
+            os.environ.get("NAVER_CLIENT_ID", ""), os.environ.get("NAVER_CLIENT_SECRET", ""),
+        )
 
     if args.json:
-        json.dump(_report_dict(report), sys.stdout, ensure_ascii=False, indent=2)
+        data = _report_dict(report, args.comments)
+        data["opinion_report_markdown"] = to_markdown(opinion) if opinion else None
+        json.dump(data, sys.stdout, ensure_ascii=False, indent=2)
         print()
     else:
-        print_report(report)
+        if opinion:
+            print(to_markdown(opinion))
+        print_report(report, args.comments)
     return 0
 
 
-def _report_dict(report: TopicReport) -> dict:
+def _report_dict(report: TopicReport, n_comments: int) -> dict:
     def video(v: Video) -> dict:
         d = asdict(v)
         d.pop("transcript")
+        d["comments"] = d["comments"][:n_comments]
         d["url"] = v.url
         return d
 
@@ -70,7 +86,7 @@ def _report_dict(report: TopicReport) -> dict:
     }
 
 
-def print_report(report: TopicReport) -> None:
+def print_report(report: TopicReport, n_comments: int = 5) -> None:
     line = "=" * 72
     print(f"\n{line}\n'{report.topic}' - 최근 {report.days}일 유튜브 반응 ({report.scanned}개 영상 분석)\n{line}")
     for label, videos in (("👍 긍정 반응", report.positive), ("👎 부정 반응", report.negative)):
@@ -92,7 +108,7 @@ def print_report(report: TopicReport) -> None:
                 print("   🎙 주요 발언: (자막 없음)")
             if v.comments:
                 print("   💬 주요 댓글:")
-                for c in v.comments:
+                for c in v.comments[:n_comments]:
                     text = c.text.replace("\n", " ")
                     if len(text) > 150:
                         text = text[:150] + "…"

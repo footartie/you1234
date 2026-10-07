@@ -50,3 +50,4 @@ class TopicReport:
     positive: list[Video]
     negative: list[Video]
     scanned: int  # how many candidate videos were analyzed
+    analyzed: list[Video] = field(default_factory=list)  # every analyzed video, by views
