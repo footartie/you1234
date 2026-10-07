@@ -41,3 +41,6 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+
+# Streamlit secrets
+.streamlit/secrets.toml
