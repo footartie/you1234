@@ -20,22 +20,28 @@ def build_report(
     comments_per_video: int = 5,
     max_candidates: int = 50,
     batch_size: int = 8,
+    report_size: int = 0,
+    report_comments: int = 20,
     progress: ProgressFn = lambda _msg: None,
 ) -> TopicReport:
     """Walk candidates in view-count order, analyzing in parallel batches, and stop
-    as soon as both the positive and negative lists are full. This keeps API
-    usage proportional to how quickly each side fills up."""
+    as soon as both the positive and negative lists are full and at least the top
+    `report_size` videos have been analyzed (those feed the opinion report, so the
+    sample isn't biased by stopping early). This keeps API usage proportional."""
     progress(f"'{topic}' 최근 {days}일 영상 검색 중...")
-    candidates = youtube.search_recent(topic, days=days, max_results=max_candidates)
+    candidates = youtube.search_recent(topic, days=days, max_results=max(max_candidates, report_size))
     progress(f"후보 {len(candidates)}개 발견 (조회수 순)")
 
     positive: list[Video] = []
     negative: list[Video] = []
     scanned = 0
+    analyzed: list[Video] = []
+    # The report quotes more comments than the cards show; the UI trims to comments_per_video.
+    n_comments = max(comments_per_video, report_comments if report_size else 0)
 
     def enrich_and_analyze(v: Video) -> Video:
         try:
-            v.comments = youtube.top_comments(v.video_id, n=comments_per_video)
+            v.comments = youtube.top_comments(v.video_id, n=n_comments)
             v.transcript = youtube.transcript(v.video_id)
             return analyzer.analyze(topic, v)
         except Exception as e:  # one bad video shouldn't sink the whole report
@@ -47,12 +53,13 @@ def build_report(
 
     with ThreadPoolExecutor(max_workers=batch_size) as pool:
         for start in range(0, len(candidates), batch_size):
-            if len(positive) >= per_side and len(negative) >= per_side:
+            if len(positive) >= per_side and len(negative) >= per_side and scanned >= report_size:
                 break
             batch = candidates[start : start + batch_size]
             # map() preserves input order, so view-count ranking is kept.
             for v in pool.map(enrich_and_analyze, batch):
                 scanned += 1
+                analyzed.append(v)
                 if v.sentiment == "error":
                     progress(f"건너뜀: {v.title} ({v.reason})")
                 elif v.sentiment == "positive" and len(positive) < per_side:
@@ -63,4 +70,4 @@ def build_report(
                 f"{scanned}/{len(candidates)}개 분석 완료 - 긍정 {len(positive)}, 부정 {len(negative)}"
             )
 
-    return TopicReport(topic=topic, days=days, positive=positive, negative=negative, scanned=scanned)
+    return TopicReport(topic=topic, days=days, positive=positive, negative=negative, scanned=scanned, analyzed=analyzed)

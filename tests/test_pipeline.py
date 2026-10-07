@@ -128,3 +128,21 @@ def test_youtube_client_uses_one_api_client_per_thread(monkeypatch):
         t.join()
     assert seen["a"][0] is seen["a"][1]  # reused within a thread
     assert seen["a"][0] is not seen["b"][0]  # never shared across threads
+
+
+def test_report_size_keeps_analyzing_past_early_stop():
+    videos = [make_video(i, 1000 - i) for i in range(30)]
+    labels = {v.video_id: ("positive" if i % 2 else "negative") for i, v in enumerate(videos)}
+    yt = FakeYouTube(videos)
+    report = build_report("x", yt, FakeAnalyzer(labels), per_side=2, batch_size=4, report_size=10)
+    # Both sides fill after 4 videos, but the top 10 must all be analyzed for the report.
+    assert report.scanned == 12
+    assert [v.video_id for v in report.analyzed[:10]] == [f"v{i}" for i in range(10)]
+    assert len(report.analyzed[0].comments) == 20  # report gets more comments than the cards
+
+
+def test_report_size_beyond_candidates_widens_search():
+    videos = [make_video(i, 100 - i) for i in range(40)]
+    labels = {v.video_id: "neutral" for v in videos}
+    report = build_report("x", FakeYouTube(videos), FakeAnalyzer(labels), max_candidates=10, report_size=30)
+    assert report.scanned == 30  # search widened from 10 to the 30 the report needs
