@@ -1,6 +1,7 @@
 """YouTube Data API v3 + transcript helpers."""
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timedelta, timezone
 
 from googleapiclient.discovery import build
@@ -13,10 +14,25 @@ from .models import Comment, Video
 
 class YouTubeClient:
     def __init__(self, api_key: str, region: str = "KR", language: str = "ko"):
-        self._yt = build("youtube", "v3", developerKey=api_key, cache_discovery=False)
-        self._transcripts = YouTubeTranscriptApi()
+        self._api_key = api_key
+        self._local = threading.local()
         self.region = region
         self.language = language
+
+    # The pipeline calls this client from several threads. googleapiclient's
+    # underlying httplib2 connection is not thread-safe (sharing it can crash the
+    # process inside SSL), so each thread gets its own API and transcript clients.
+    @property
+    def _yt(self):
+        if not hasattr(self._local, "yt"):
+            self._local.yt = build("youtube", "v3", developerKey=self._api_key, cache_discovery=False)
+        return self._local.yt
+
+    @property
+    def _transcripts(self) -> YouTubeTranscriptApi:
+        if not hasattr(self._local, "transcripts"):
+            self._local.transcripts = YouTubeTranscriptApi()
+        return self._local.transcripts
 
     def search_recent(self, topic: str, days: int = 7, max_results: int = 50) -> list[Video]:
         """Videos about `topic` published in the last `days` days, most viewed first.
@@ -118,7 +134,9 @@ class YouTubeClient:
         """Timestamped transcript ("[mm:ss] text" per line), or "" if unavailable."""
         try:
             fetched = self._transcripts.fetch(video_id, languages=[self.language, "ko", "en"])
-        except YouTubeTranscriptApiException:
+        except (YouTubeTranscriptApiException, OSError, ValueError):
+            # Transcripts are optional: blocked IPs, network errors or odd caption
+            # data just mean the video is analyzed without one.
             return ""
         lines = []
         for s in fetched:
