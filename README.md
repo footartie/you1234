@@ -8,13 +8,37 @@
 
 을 빠르게 보여주는 프로그램입니다. 웹 화면(Streamlit)과 터미널(CLI) 둘 다 지원합니다.
 
+## 💸 완전 무료로 쓰기
+
+**필요한 건 무료 YouTube API 키 하나뿐입니다.** Anthropic 키가 없으면 자동으로 **무료 키워드 분석 모드**로 동작합니다.
+
+| 구성 요소 | 비용 |
+|---|---|
+| YouTube Data API v3 | 무료 (하루 10,000 단위 ≈ 검색 60회 이상) |
+| Streamlit Community Cloud 호스팅 | 무료 |
+| 무료 키워드 분석 (기본) | 무료 – 외부 서비스 호출 없음 |
+| Claude AI 분석 (선택) | 유료 – `ANTHROPIC_API_KEY`를 넣었을 때만 사용 |
+
+**무료 키워드 분석은 이렇게 동작합니다.**
+- 제목(가중치 3)·설명·자막·댓글(좋아요 많을수록 가중)에서 긍정어(최고, 추천, 감동…)와 부정어(최악, 논란, 실망…)를 세어 입장을 정합니다. "안 좋아요"처럼 부정된 긍정어는 부정으로 셉니다.
+- 판단 근거에 실제로 잡힌 단어와 횟수를 보여줍니다.
+- 주요 발언은 자막에서 주제어와 감정 단어가 가장 많이 나온 구간을 타임스탬프와 함께 뽑습니다. 화자 이름은 알 수 없어 "영상 속 화자"로 표시합니다.
+- 반어법·비꼼은 구분하지 못하므로 Claude 모드보다 정확도가 낮습니다. 단어 목록은 `ytpulse/free_analyzer.py`의 `POSITIVE` / `NEGATIVE`에서 바로 고칠 수 있습니다.
+
+### YouTube API 키 무료 발급
+
+1. https://console.cloud.google.com 접속 → 새 프로젝트 만들기 (결제 정보 등록 불필요)
+2. **API 및 서비스 → 라이브러리**에서 *YouTube Data API v3* 검색 → **사용**
+3. **사용자 인증 정보 → 사용자 인증 정보 만들기 → API 키** → 생성된 키 복사
+4. 키 설정에서 **API 제한사항**을 *YouTube Data API v3*로 제한 (권장)
+
 ## 동작 방식
 
 1. **YouTube Data API v3**로 `publishedAfter = 지금-7일`, `order=viewCount` 검색 → 실제 조회수로 재정렬
 2. 조회수 높은 영상부터 8개씩 병렬로
    - 인기 댓글 수집 (`commentThreads`, 좋아요 순 상위 5개)
    - 자막 수집 (`youtube-transcript-api`, 한국어 → 영어 순)
-   - **Claude**가 제목·설명·자막·댓글을 보고 주제에 대한 입장(긍정/부정/중립), 요약, 판단 근거, 주요 발언(최대 3개)을 JSON으로 반환
+   - 입장(긍정/부정/중립)·요약·판단 근거·주요 발언 분석: 기본은 **무료 키워드 분석**, `ANTHROPIC_API_KEY`가 있으면 **Claude**가 제목·설명·자막·댓글을 읽고 판단
 3. 긍정 5개·부정 5개가 다 채워지면 **즉시 중단** → 불필요한 API 호출 최소화
 
 ## 설치
@@ -27,7 +51,7 @@ cp .env.example .env   # 키 입력
 | 환경변수 | 설명 |
 |---|---|
 | `YOUTUBE_API_KEY` | Google Cloud Console에서 *YouTube Data API v3* 사용 설정 후 발급한 API 키 |
-| `ANTHROPIC_API_KEY` | https://console.anthropic.com 에서 발급 |
+| `ANTHROPIC_API_KEY` (선택, 유료) | 넣으면 Claude AI 분석 사용. 비워두면 무료 키워드 분석 |
 | `CLAUDE_MODEL` (선택) | 기본값 `claude-opus-5-5` |
 | `MAX_TRANSCRIPT_CHARS` (선택) | 영상당 Claude에 보내는 자막 최대 글자 수 (기본 40000, `0`이면 제한 없음) |
 
@@ -47,6 +71,7 @@ streamlit run app.py
 python -m ytpulse "갤럭시 S26"
 python -m ytpulse "금리 인하" --days 3 --per-side 3
 python -m ytpulse "AI 규제" --region US --lang en --json > result.json
+python -m ytpulse "갤럭시 S26" --free   # Anthropic 키가 있어도 무료 모드 강제
 ```
 
 ## 웹에 배포해서 공유하기 (주제만 입력하면 되는 버전)
@@ -60,8 +85,8 @@ API 키는 **서버 비밀값(secrets)** 으로만 저장되고 방문자 화면
 3. **Advanced settings → Secrets** 에 아래 내용 붙여넣기 (`.streamlit/secrets.toml.example` 참고)
    ```toml
    YOUTUBE_API_KEY = "AIza..."
-   ANTHROPIC_API_KEY = "sk-ant-..."
    APP_PASSWORD = "원하는-비밀번호"   # 비워두면 누구나 사용 가능
+   # ANTHROPIC_API_KEY = "sk-ant-..."  # 선택(유료). 없으면 무료 키워드 분석
    ```
 4. **Deploy** → `https://<앱이름>.streamlit.app` 주소를 공유
 
@@ -69,9 +94,9 @@ API 키는 **서버 비밀값(secrets)** 으로만 저장되고 방문자 화면
 
 ### 보안 권장 사항
 
-- 링크를 아는 사람은 누구나 내 YouTube 할당량과 Anthropic 요금을 쓸 수 있으므로 **`APP_PASSWORD` 설정을 권장**합니다.
+- 링크를 아는 사람은 누구나 내 YouTube 할당량(무료 모드여도 하루 한도가 있음)과, Claude 모드라면 Anthropic 요금을 쓸 수 있으므로 **`APP_PASSWORD` 설정을 권장**합니다.
 - Google Cloud Console에서 YouTube API 키의 **API 제한**을 *YouTube Data API v3* 하나로 걸어두세요.
-- Anthropic Console에서 월 사용 한도(spend limit)를 설정해 두면 안전합니다.
+- Claude 모드를 쓴다면 Anthropic Console에서 월 사용 한도(spend limit)를 설정해 두면 안전합니다.
 - 같은 주제·설정의 검색 결과는 1시간 캐시되어 반복 검색 시 API를 다시 쓰지 않습니다.
 
 ### 로컬에서 같은 방식으로 실행

@@ -1,3 +1,4 @@
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 import ytpulse
@@ -8,6 +9,7 @@ def _app(monkeypatch, **env):
     for k in ("YOUTUBE_API_KEY", "ANTHROPIC_API_KEY", "APP_PASSWORD"):
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: None)
+    st.cache_data.clear()  # results are cached per topic across tests
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     return AppTest.from_file("../app.py", default_timeout=30)
@@ -44,3 +46,19 @@ def test_topic_search_renders_both_sides(monkeypatch):
     md = " ".join(m.value for m in at.markdown)
     assert "좋은 영상" in md
     assert "해당하는 영상을 찾지 못했습니다" in at.info[0].value
+
+
+def test_free_mode_without_anthropic_key(monkeypatch):
+    seen = {}
+
+    def fake_report(topic, yt, analyzer, **kw):
+        seen["analyzer"] = analyzer
+        return TopicReport(topic, 7, [], [], 0)
+
+    monkeypatch.setattr(ytpulse, "build_report", fake_report)
+    at = _app(monkeypatch, YOUTUBE_API_KEY="y").run()
+    assert not at.error
+    assert any("무료 키워드 분석" in c.value for c in at.caption)
+    at.text_input[0].input("갤럭시")
+    at.button[0].click().run()
+    assert isinstance(seen["analyzer"], ytpulse.FreeAnalyzer)

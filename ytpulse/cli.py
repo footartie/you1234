@@ -9,7 +9,7 @@ from dataclasses import asdict
 
 from dotenv import load_dotenv
 
-from .analyzer import Analyzer
+from .free_analyzer import make_analyzer
 from .models import TopicReport, Video
 from .pipeline import build_report
 from .youtube import YouTubeClient
@@ -26,6 +26,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--region", default="KR")
     p.add_argument("--lang", default="ko")
     p.add_argument("--json", action="store_true", help="JSON으로 출력")
+    p.add_argument("--free", action="store_true", help="Anthropic 키가 있어도 무료 키워드 분석 사용")
     args = p.parse_args(argv)
 
     yt_key = os.environ.get("YOUTUBE_API_KEY")
@@ -37,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     report = build_report(
         args.topic,
         YouTubeClient(yt_key, region=args.region, language=args.lang),
-        Analyzer(),
+        make_analyzer(os.environ.get("ANTHROPIC_API_KEY", ""), free=args.free),
         days=args.days,
         per_side=args.per_side,
         comments_per_video=args.comments,

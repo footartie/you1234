@@ -7,7 +7,7 @@ import os
 import streamlit as st
 from dotenv import load_dotenv
 
-from ytpulse import Analyzer, Video, YouTubeClient, build_report
+from ytpulse import Video, YouTubeClient, build_report, make_analyzer
 
 load_dotenv()
 
@@ -30,9 +30,9 @@ st.set_page_config(page_title="YouTube 반응 요약", page_icon="📺", layout=
 st.title("📺 유튜브 주제 반응 한눈에 보기")
 st.caption("주제만 입력하면 최근 일주일 동안 조회수 높은 순으로 긍정/부정 영상, 영상 속 주요 발언, 인기 댓글을 보여줍니다.")
 
-if not YOUTUBE_API_KEY or not ANTHROPIC_API_KEY:
+if not YOUTUBE_API_KEY:
     st.error(
-        "서버에 API 키가 설정되지 않았습니다. 관리자는 YOUTUBE_API_KEY와 ANTHROPIC_API_KEY를 "
+        "서버에 YouTube API 키가 설정되지 않았습니다. 관리자는 YOUTUBE_API_KEY를 "
         "Streamlit secrets(또는 .env)에 등록하세요."
     )
     st.stop()
@@ -59,6 +59,10 @@ with st.form("search"):
         region = c1.text_input("지역 코드", "KR")
         lang = c2.text_input("언어 코드", "ko")
     submitted = st.form_submit_button("분석하기", type="primary")
+st.caption(
+    "분석 방식: Claude AI" if ANTHROPIC_API_KEY
+    else "분석 방식: 무료 키워드 분석 (긍정/부정 단어 빈도로 판단, 비용 없음)"
+)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -67,7 +71,7 @@ def run(topic, days, per_side, n_comments, candidates, region, lang):
     report = build_report(
         topic,
         YouTubeClient(YOUTUBE_API_KEY, region=region, language=lang),
-        Analyzer(api_key=ANTHROPIC_API_KEY),
+        make_analyzer(ANTHROPIC_API_KEY),
         days=days,
         per_side=per_side,
         comments_per_video=n_comments,
