@@ -35,3 +35,12 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Streamlit secrets
+.streamlit/secrets.toml
